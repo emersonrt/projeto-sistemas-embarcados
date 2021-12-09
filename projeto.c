@@ -141,6 +141,7 @@ void main(void){
     adc_init(); //inicia conversor
     PWM1_Init(); //inicia pwm
     PWM1_Start();
+    HEATER=1;
     
     lcd_cmd(linha1_ini);
     lcd_puts("T. atual:");
@@ -163,14 +164,10 @@ void main(void){
         
         
         //lógica para controlar temperatura
-        if (tempAtual > tempIdeal) {
-            if (velocidadeCooler < 255) { //controle para não zerar a velocidade
-                velocidadeCooler++;
-            }
-            HEATER=0;
+        if (tempAtual > tempIdeal && velocidadeCooler < 255) {
+            velocidadeCooler++;
         } else if (velocidadeCooler > 1){
             velocidadeCooler--;
-            HEATER=1;
         }
         PWM1_Set_Duty(velocidadeCooler);  //PWM controla cooler
         
