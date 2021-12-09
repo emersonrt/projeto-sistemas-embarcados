@@ -168,8 +168,10 @@ void main(void){
         
         if (digitalRead(_RB0) == 0) {
             tempIdeal --;
+            delay_ms(80);
         } else if (digitalRead(_RB1) == 0) {
             tempIdeal ++;
+            delay_ms(80);
         }
         converte_LCD(linha2_fim, tempIdeal);
         
