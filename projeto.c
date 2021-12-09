@@ -4,8 +4,8 @@
 |   NOME      :   Display de Cristal L?quido        |
 |   VERSAO    :   1.0                               |
 |   COMPILADOR:   XC08 V2.32                        |
-|   DATA      :   Outubro 01, 2021                  |
-|   AUTOR     :   Emerson R. Teixeira               |
+|   DATA      :   Dezembro 10, 2021                 |
+|   AUTORES   :   Emerson Teixeira, Renato Machado  |
 |   PLACA     :   Simulacao (PICSimLab) PICGENIUS   |
 |   uC        :   PIC18F4550                        |
 |---------------------------------------------------|
@@ -75,6 +75,7 @@
 //Botões RB0 e RB1
 #define _RB0 0x10
 #define _RB1 0x11
+#define _RB2 0x12
 
 //Definicao dos comandos do LCD
 #define linha1_ini 0x80
@@ -114,7 +115,7 @@ void e2prom_write(unsigned char endereco,unsigned char dado);
 
 //Funções dígitos Memória
 int lerInteiroMemoria4Digitos();
-void gravarInteiroMemoria4Digitos();
+void gravarInteiroMemoria4Digitos(int valor);
 
 //Função para leitura dos botões
 unsigned char digitalRead(unsigned char pin);
@@ -153,6 +154,7 @@ void main(void){
     
     while(1) {
         
+        //leitura temp atual
         ConvertADC();                       //inicia conversão
         delay_ms(1);                        //espera fim da conversao
         tempAtual = ReadADC();              //le o resultado
@@ -173,16 +175,17 @@ void main(void){
         PWM1_Set_Duty(velocidadeCooler);  //PWM controla cooler
         
         
+        
+        //leitura dos botões e memória
         tempIdeal = lerInteiroMemoria4Digitos();
-        //leitura push buttons
         if (digitalRead(_RB0) == 0) {
             tempIdeal --;
             delay_ms(80);
         } else if (digitalRead(_RB1) == 0) {
             tempIdeal ++;
             delay_ms(80);
-        }        
-        gravarInteiroMemoria4Digitos();
+        }     
+        gravarInteiroMemoria4Digitos(tempIdeal);
         converte_LCD(linha2_fim, tempIdeal);
         
     }
@@ -201,15 +204,15 @@ int lerInteiroMemoria4Digitos() {
     return (milhar*1000)+(centena*100)+(dezena*10)+(unidade);
 }
 
-void gravarInteiroMemoria4Digitos() {    
+void gravarInteiroMemoria4Digitos(int valor) {    
     unsigned int milhar=0;
     unsigned int centena=0;
     unsigned int dezena=0;
     unsigned int unidade=0;
-    milhar = tempIdeal/1000;
-    centena = (tempIdeal-(milhar*1000))/100;
-    dezena = (tempIdeal-(milhar*1000)-(centena*100))/10;
-    unidade = tempIdeal-(milhar*1000)-(centena*100)-(dezena*10);
+    milhar = valor/1000;
+    centena = (valor-(milhar*1000))/100;
+    dezena = (valor-(milhar*1000)-(centena*100))/10;
+    unidade = valor-(milhar*1000)-(centena*100)-(dezena*10);
     
     //se memória vazia, inicializar variáveis
     if ((char) milhar > 9) {        
