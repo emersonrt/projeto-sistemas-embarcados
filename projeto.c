@@ -128,9 +128,7 @@ void main(void){
     TRISC=0x00; 
     TRISD=0x00;
     TRISE=0x00;
-    
-    PORTB = 00000011; //ativar RB0 e RB1;
-        
+            
     lcd_init();
     adc_init();
     PWM1_Init();
@@ -156,16 +154,19 @@ void main(void){
         
         
         //lógica para controlar temperatura
-        if (tempAtual > tempIdeal && velocidadeCooler < 255) {
-         velocidadeCooler++;
-         HEATER=0;
+        if (tempAtual > tempIdeal) {
+            if (velocidadeCooler < 255) { //controle para não zerar a velocidade
+                velocidadeCooler++;
+            }
+            HEATER=0;
         } else if (velocidadeCooler > 1){
-         velocidadeCooler--;
-         HEATER=1;
+            velocidadeCooler--;
+            HEATER=1;
         }
         PWM1_Set_Duty(velocidadeCooler);  //PWM controla cooler
         
         
+        //leitura push buttons
         if (digitalRead(_RB0) == 0) {
             tempIdeal --;
             delay_ms(80);
