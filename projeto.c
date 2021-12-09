@@ -108,12 +108,20 @@ void ConvertADC(void);
 unsigned int ReadADC(void);
 void adc_init(void);
 
+//Funções Memória EEPROM
+unsigned char e2prom_read(unsigned char endereco);
+void e2prom_write(unsigned char endereco,unsigned char dado);
+
+//Funções dígitos Memória
+int lerInteiroMemoria4Digitos();
+void gravarInteiroMemoria4Digitos();
+
 //Função para leitura dos botões
 unsigned char digitalRead(unsigned char pin);
 
 
 int tempAtual;
-int tempIdeal = 350;
+int tempIdeal;
 int velocidadeCooler = 10;
 
 //-------------------------------------------------------
@@ -121,7 +129,6 @@ int velocidadeCooler = 10;
 //-------------------------------------------------------
 void main(void){
 
-    //    TRABALHO
     TRISA=0x04; //entrada -> sensor de temp
     
     //saídas
@@ -129,16 +136,16 @@ void main(void){
     TRISD=0x00;
     TRISE=0x00;
             
-    lcd_init();
-    adc_init();
-    PWM1_Init();
+    lcd_init(); //inicia visor
+    adc_init(); //inicia conversor
+    PWM1_Init(); //inicia pwm
     PWM1_Start();
     
     lcd_cmd(linha1_ini);
     lcd_puts("T. atual:");
     lcd_cmd(linha2_ini);
     lcd_puts("T. ideal: ");
-    converte_LCD(linha2_fim, tempIdeal);    
+    converte_LCD(linha2_fim, tempIdeal);
     lcd_cmd(linha3);
     lcd_puts("RB1 para + temp");
     lcd_cmd(linha4);
@@ -166,6 +173,7 @@ void main(void){
         PWM1_Set_Duty(velocidadeCooler);  //PWM controla cooler
         
         
+        tempIdeal = lerInteiroMemoria4Digitos();
         //leitura push buttons
         if (digitalRead(_RB0) == 0) {
             tempIdeal --;
@@ -173,11 +181,47 @@ void main(void){
         } else if (digitalRead(_RB1) == 0) {
             tempIdeal ++;
             delay_ms(80);
-        }
+        }        
+        gravarInteiroMemoria4Digitos();
         converte_LCD(linha2_fim, tempIdeal);
         
     }
     
+}
+
+
+//-------------------------------------------------------
+//      Funções gravar dígitos na memória
+//-------------------------------------------------------
+int lerInteiroMemoria4Digitos() {
+    unsigned int milhar=(int) e2prom_read('3');
+    unsigned int centena=(int) e2prom_read('2');
+    unsigned int dezena=(int) e2prom_read('1');
+    unsigned int unidade=(int) e2prom_read('0');
+    return (milhar*1000)+(centena*100)+(dezena*10)+(unidade);
+}
+
+void gravarInteiroMemoria4Digitos() {    
+    unsigned int milhar=0;
+    unsigned int centena=0;
+    unsigned int dezena=0;
+    unsigned int unidade=0;
+    milhar = tempIdeal/1000;
+    centena = (tempIdeal-(milhar*1000))/100;
+    dezena = (tempIdeal-(milhar*1000)-(centena*100))/10;
+    unidade = tempIdeal-(milhar*1000)-(centena*100)-(dezena*10);
+    
+    //se memória vazia, inicializar variáveis
+    if ((char) milhar > 9) {        
+        milhar = 0;
+        centena = 3;
+        dezena = 0;
+    }
+    
+    e2prom_write('3', (char) milhar);
+    e2prom_write('2', (char) centena);
+    e2prom_write('1', (char) dezena);
+    e2prom_write('0', (char) unidade);
 }
 
 //-------------------------------------------------------
