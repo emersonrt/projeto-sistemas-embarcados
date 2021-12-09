@@ -63,12 +63,18 @@
 #define D7SEG_D PORTAbits.RA4//PORTBbits.RB5
 #define D7SEG_U PORTAbits.RA5//PORTBbits.RB4
 #define BOTAO   PORTAbits.RB1
+
 //LCD PORTD
 #define RS PORTEbits.RE2
 #define EN PORTEbits.RE1
+
 //I/O
 #define COOLER PORTCbits.RC2
 #define HEATER PORTCbits.RC5
+
+//Botões RB0 e RB1
+#define _RB0 0x10
+#define _RB1 0x11
 
 //Definicao dos comandos do LCD
 #define linha1_ini 0x80
@@ -102,6 +108,8 @@ void ConvertADC(void);
 unsigned int ReadADC(void);
 void adc_init(void);
 
+//Função para leitura dos botões
+unsigned char digitalRead(unsigned char pin);
 
 
 int tempAtual;
@@ -120,6 +128,8 @@ void main(void){
     TRISC=0x00; 
     TRISD=0x00;
     TRISE=0x00;
+    
+    PORTB = 00000011; //ativar RB0 e RB1;
         
     lcd_init();
     adc_init();
@@ -155,8 +165,38 @@ void main(void){
         }
         PWM1_Set_Duty(velocidadeCooler);  //PWM controla cooler
         
+        
+        if (digitalRead(_RB0) == 0) {
+            tempIdeal --;
+        } else if (digitalRead(_RB1) == 0) {
+            tempIdeal ++;
+        }
+        converte_LCD(linha2_fim, tempIdeal);
+        
     }
     
+}
+
+//-------------------------------------------------------
+//      Função para ler push buttons
+//-------------------------------------------------------
+unsigned char digitalRead(unsigned char pin)
+{
+    unsigned char val = 1<<(0x0F & pin);
+    switch((pin & 0xF0)>>4)
+    {
+       case 0:
+         return (PORTA & val) == val;
+       case 1:
+         return (PORTB & val) == val;  
+       case 2:
+         return (PORTC & val) == val;
+        case 3:
+         return (PORTD & val) == val;  
+       case 4:
+         return (PORTE & val) == val;      
+    }
+    return 0;
 }
 
 //-------------------------------------------------------
