@@ -77,6 +77,11 @@
 #define _RB1 0x11
 #define _RB2 0x12
 
+// Caracteres da UART
+#define CR  0x0D // Carriage return ('\r')
+#define LF  0x0A // Line feed ('\n')
+#define TAB 0x09 // Tabulação horizontal ('\t')
+
 //Definicao dos comandos do LCD
 #define linha1_ini 0x80
 #define linha1_fim 0x8a
@@ -90,6 +95,17 @@
 #define cursor_on 0x0e        // +----+----+----+----+----+-----+----+
 #define rotaciona_direita 0x1c
 
+#define MENU_TEMPERATURA 1
+#define MENU_SERIAL 2
+#define MENU_PWM 3
+#define MENU_ERRO 4
+
+#define VELOCIDADE_INICIAL_COOLER 10
+#define TEMPERATURA_ERRO 550
+#define TEMPERATURA_PADRAO 400
+#define PWM_MAXIMO 255
+
+
 //Declaracao das funcoes
 void lcd_cmd(unsigned char dado);
 void lcd_escreve(unsigned char dado);
@@ -97,7 +113,7 @@ void lcd_puts(char *s);
 void lcd_init(void);
 void delay(void);
 void delay_ms(unsigned int a);
-void converte_LCD(int linha, int valor);
+void converte_LCD(int linha, int valor, int comPonto);
 
 //Funcoes do PWM
 void PWM1_Init(void);
@@ -120,10 +136,23 @@ void gravarInteiroMemoria4Digitos(int valor);
 //Função para leitura dos botões
 unsigned char digitalRead(unsigned char pin);
 
+//Funções comunicação serial
+void init_uart(void);
+void escreve_UART(unsigned char c);
+void string_UART(volatile unsigned char *s);
+void converte_UART(int valor, int flagComPonto);
+
+////Funções Menu
+void recepcaoComando(char comando);
+void alteraMenu(int codigoMenu);
+
 
 int tempAtual;
 int tempIdeal;
-int velocidadeCooler = 10;
+int velocidadeCooler = VELOCIDADE_INICIAL_COOLER;
+int menuAtivo = MENU_TEMPERATURA;
+int flagErroSistema = 0;
+unsigned char comando;
 
 //-------------------------------------------------------
 //		Funcao Principal
@@ -138,20 +167,14 @@ void main(void){
     TRISE=0x00;
             
     lcd_init(); //inicia visor
+    init_uart(); //inicia comunicação serial
     adc_init(); //inicia conversor
     PWM1_Init(); //inicia pwm
     PWM1_Start();
     HEATER=1;
     
-    lcd_cmd(linha1_ini);
-    lcd_puts("T. atual:");
-    lcd_cmd(linha2_ini);
-    lcd_puts("T. ideal: ");
-    converte_LCD(linha2_fim, tempIdeal);
-    lcd_cmd(linha3);
-    lcd_puts("RB1 para + temp");
-    lcd_cmd(linha4);
-    lcd_puts("RB0 para - temp");
+    alteraMenu(menuAtivo);    
+    string_UART("Teste de Transmissao\n");
     
     while(1) {
         
@@ -160,34 +183,156 @@ void main(void){
         delay_ms(1);                        //espera fim da conversao
         tempAtual = ReadADC();              //le o resultado
         tempAtual = (tempAtual*10)/2.040;   //calculo do sensor de temperatura
-        converte_LCD(linha1_fim, tempAtual);
+        
+        
+        //lógica para erro de temperatura alta
+        if (tempAtual > TEMPERATURA_ERRO) {
+            flagErroSistema = 1;
+            PWM1_Set_Duty(PWM_MAXIMO);
+            gravarInteiroMemoria4Digitos(TEMPERATURA_PADRAO);
+        } else {
+            flagErroSistema = 0;
+            PWM1_Set_Duty(velocidadeCooler);
+        }
         
         
         //lógica para controlar temperatura
-        if (tempAtual > tempIdeal && velocidadeCooler < 255) {
-            velocidadeCooler++;
-        } else if (velocidadeCooler > 1){
-            velocidadeCooler--;
+        if (flagErroSistema == 0) {
+            if (velocidadeCooler < PWM_MAXIMO && tempAtual > tempIdeal) {
+                velocidadeCooler++;
+            } else if (velocidadeCooler > 1){
+                velocidadeCooler--;
+            }
+            PWM1_Set_Duty(velocidadeCooler);  //PWM controla cooler
         }
-        PWM1_Set_Duty(velocidadeCooler);  //PWM controla cooler
-        
         
         
         //leitura dos botões e memória
-        tempIdeal = lerInteiroMemoria4Digitos();
-        if (digitalRead(_RB0) == 0) {
+        tempIdeal = lerInteiroMemoria4Digitos(); //lê temp memória
+        if (digitalRead(_RB0) == 0) { //diminui temp
             tempIdeal --;
             delay_ms(80);
-        } else if (digitalRead(_RB1) == 0) {
+        } else if (digitalRead(_RB1) == 0) { //aumenta temp
             tempIdeal ++;
             delay_ms(80);
-        }     
-        gravarInteiroMemoria4Digitos(tempIdeal);
-        converte_LCD(linha2_fim, tempIdeal);
+        } else if (digitalRead(_RB2) == 0) { //reset
+            alteraMenu(MENU_TEMPERATURA);
+            delay_ms(80);
+        }  
+        gravarInteiroMemoria4Digitos(tempIdeal); //grava memória
+        
+        
+// ---------------------------------------------------------------------
+//        Comunicação Serial / Menu
+//              Comandos: # ? Temperatura / $ ? Serial / % ? PWM
+// ----------------------------------------------------------------------
+        if (flagErroSistema == 1) {
+            alteraMenu(MENU_ERRO);
+            delay_ms(50);
+        } else if (menuAtivo == MENU_TEMPERATURA) {
+            converte_LCD(linha1_fim, tempAtual, 1);
+            converte_LCD(linha2_fim, tempIdeal, 1);
+        } else if (menuAtivo == MENU_SERIAL) {
+            string_UART("Temp atual:");
+            converte_UART(tempAtual, 1);
+            string_UART("Temp Ideal:");
+            converte_UART(tempIdeal, 1);
+            string_UART("PWM atual:");
+            converte_UART(velocidadeCooler, 0);
+            escreve_UART(LF);
+            delay_ms(200);
+        } else if (menuAtivo == MENU_PWM) {
+            converte_LCD(linha2_ini, velocidadeCooler, 0);
+        }
         
     }
     
 }
+
+
+////--------------------------------------------------------------------------------
+////Rotina de serviço de interrupção Alta prioridade(ISR - Interrupt Service Routine)
+////--------------------------------------------------------------------------------
+void __interrupt() isr(void) {
+	// Desabilita todas as interrupções temporariamente
+	INTCONbits.GIE = 0;
+
+	// Interrupção de recepção da serial (UART)
+	if (PIE1bits.RCIE && PIR1bits.RCIF) {
+		comando = RCREG;
+		PIR1bits.RCIF = 0; // limpa flag de recebimento 
+
+		// Erro de overrun. Limpa flag de recepção contínua (CREN)
+		if (RCSTAbits.OERR) {
+			RCSTAbits.CREN = 0;
+			RCSTAbits.CREN = 1;
+		}
+        
+        recepcaoComando(comando);
+	}
+
+	// Reabilita todas as interrupções
+	INTCONbits.GIE = 1;
+   
+}
+
+void recepcaoComando(char comando) {    
+    if (comando == '#') {
+        alteraMenu(MENU_TEMPERATURA);
+    } else if (comando == '$') {
+        alteraMenu(MENU_SERIAL);
+    } else if (comando == '%') {
+        alteraMenu(MENU_PWM);
+    }
+}
+
+
+//-------------------------------------------------------
+//      Configura a porta serial
+//-------------------------------------------------------
+
+void init_uart(void) { //inicializa UART 9600bps , start bit 1, stopbit 1, SEM parity
+    TRISCbits.TRISC7=1; //Make UART RX pin input
+    TRISCbits.TRISC6=0; //Make UART TX pin output
+    SPBRGH  = 0x01;     //cristal de 10 MHz tabela de frequencias pg251,252
+    SPBRG   = 0x03;
+
+    RCSTAbits.CREN=1;   //1 = habilita recepcao
+    RCSTAbits.SPEN=1;   //1 = Serial port enabled (configures RX/DT and TX/CK pins as serial port pins)
+    BAUDCONbits.BRG16=1;//1 = 16-bit Baud Rate Generator _ SPBRGH and SPBRG
+
+    TXSTAbits.SYNC=0;  //0 = Asynchronous mode
+    TXSTAbits.BRGH=1;  //1 = Alta velocidade 
+    TXSTAbits.TXEN=1;  //1 = Transmissao habilitada
+
+    RCONbits.IPEN = 1;  //enable Interrupt priority levels
+    IPR1bits.RCIP=1;     // EUSART Receive Interrupt Priority 0 = Low priority  Modificado
+    PIE1bits.RCIE=1;     // 1 = Enables the EUSART receive interrupt
+    INTCONbits.GIEL = 1;//enable interrupts
+    INTCONbits.GIEH = 1;
+}
+
+
+//-------------------------------------------------------
+//      Funcao que envia um byte pela serial
+//-------------------------------------------------------
+
+void escreve_UART(unsigned char c) {  
+    while (!TXSTAbits.TRMT);
+	TXREG = c;
+}
+
+
+//-------------------------------------------------------
+//      Transmite uma string pela serial
+//-------------------------------------------------------
+void string_UART(volatile unsigned char *s) {
+	while (*s != '\0') {
+		escreve_UART(*s);
+        s++;
+	}	
+}
+
 
 
 //-------------------------------------------------------
@@ -214,8 +359,9 @@ void gravarInteiroMemoria4Digitos(int valor) {
     //se memória vazia, inicializar variáveis
     if ((char) milhar > 9) {        
         milhar = 0;
-        centena = 3;
+        centena = 4;
         dezena = 0;
+        unidade = 0;
     }
     
     e2prom_write('3', (char) milhar);
@@ -245,6 +391,7 @@ unsigned char digitalRead(unsigned char pin)
     }
     return 0;
 }
+
 
 //-------------------------------------------------------
 //      Funções ADC
@@ -313,7 +460,7 @@ void lcd_puts(char *s)
       lcd_escreve(*s++);
 }
 
-void converte_LCD(int linha, int valor) {
+void converte_LCD(int linha, int valor, int flagComPonto) {
     unsigned int milhar=0;
     unsigned int centena=0;
     unsigned int dezena=0;
@@ -326,9 +473,27 @@ void converte_LCD(int linha, int valor) {
     lcd_escreve(milhar+0x30); //Soma para converter para ascii
     lcd_escreve(centena+0x30); //Soma para converter para ascii
     lcd_escreve(dezena+0x30); //Soma para converter para ascii
-    lcd_escreve('.');
+    if (flagComPonto == 1) {lcd_escreve('.');}
     lcd_escreve(unidade+0x30); //Soma para converter para ascii
 }
+
+void converte_UART(int valor, int flagComPonto) {
+    unsigned int milhar=0;
+    unsigned int centena=0;
+    unsigned int dezena=0;
+    unsigned int unidade=0;
+    milhar = valor/1000;
+    centena = (valor-milhar*1000)/100;
+    dezena = (valor-milhar*1000-centena*100)/10;
+    unidade = valor-milhar*1000-centena*100-dezena*10;
+    escreve_UART(milhar+0x30); //Soma para converter para ascii
+    escreve_UART(centena+0x30); //Soma para converter para ascii
+    escreve_UART(dezena+0x30); //Soma para converter para ascii
+    if (flagComPonto == 1) {escreve_UART('.');}
+    escreve_UART(unidade+0x30); //Soma para converter para ascii
+    escreve_UART(TAB);
+}
+
 
 //-------------------------------------------------------
 //      Funcao Delay 1ms
@@ -415,4 +580,43 @@ void PWM1_Set_Duty(unsigned char d) {
     temp=(((unsigned long)(d))*((PR2<<2)|0x03))/255;
     CCPR1L= (0x03FC&temp)>>2;
     CCP1CON=((0x0003&temp)<<4)|0x0F;
+}
+
+
+void alteraMenu(int codigoTipoMenu) {
+    menuAtivo = codigoTipoMenu;
+    lcd_cmd(limpa_lcd);
+    switch (codigoTipoMenu) {
+        case MENU_TEMPERATURA:
+            lcd_cmd(linha1_ini);
+            lcd_puts("T. atual:");
+            lcd_cmd(linha2_ini);
+            lcd_puts("T. ideal: ");
+            converte_LCD(linha2_fim, tempIdeal, 1);
+            lcd_cmd(linha3);
+            lcd_puts("RB1 para + temp");
+            lcd_cmd(linha4);
+            lcd_puts("RB0 para - temp");
+        return;
+        case MENU_SERIAL:
+            lcd_cmd(linha1_ini);
+            lcd_puts("Serial RS232");
+            lcd_cmd(linha2_ini);
+            lcd_puts("Enviando Temp");
+            lcd_cmd(linha3);
+            lcd_puts("Enviando PWM");
+        return;
+        case MENU_PWM:
+            lcd_cmd(linha1_ini);
+            lcd_puts("Velocidade PWM:");
+        return;
+        case MENU_ERRO:
+            lcd_cmd(linha1_ini);
+            lcd_puts("ERRO!");
+            lcd_cmd(linha2_ini);
+            lcd_puts("TEMP. ELEVADA");
+            lcd_cmd(linha4);
+            lcd_puts("RB2 para reset");
+        return;
+    }
 }
